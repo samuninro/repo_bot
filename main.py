@@ -458,6 +458,7 @@ def format_report(data: dict) -> str:
     f"{done_block}"
     f"{left_block}"
     f"{materials_block}"
+        
 
         f"<b>9️⃣ Ответственный</b>\n"
         f"{resp_block}\n"
