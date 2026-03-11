@@ -438,10 +438,10 @@ def format_report(data: dict) -> str:
         f"<b>2️⃣ План работ на текущий день</b>\n"
         f"{plan_block}\n\n"
 
-    f"<b>3️⃣ Ресурсы на объекте</b>\n"
-    f"• ИТР: <b>{esc(format_num(itr))}</b> чел.\n"
-    f"• Рабочие: <b>{esc(format_num(workers))}</b> чел.\n"
-    f"• Техника: <b>{esc(format_num(machines))}</b> ед.\n\n"
+        f"<b>3️⃣ Ресурсы на объекте</b>\n"
+        f"• ИТР: <b>{esc(format_num(itr))}</b> чел.\n"
+        f"• Рабочие: <b>{esc(format_num(workers))}</b> чел.\n"
+        f"• Техника: <b>{esc(format_num(machines))}</b> ед.\n\n"
 
         f"<b>4️⃣ Фактически выполненные работы за прошедшие сутки</b>\n"
         f"{fact_block}\n\n"
@@ -455,9 +455,9 @@ def format_report(data: dict) -> str:
         f"• Тип трубы: <b>{esc(data.get('heat_pipe', ''))}</b>\n"
         f"• Способ прокладки: <b>{esc(data.get('heat_laying', ''))}</b>\n\n"
 
-    f"{done_block}"
-    f"{left_block}"
-    f"{materials_block}"
+        f"{done_block}"
+        f"{left_block}"
+        f"{materials_block}"
         
 
         f"<b>9️⃣ Ответственный</b>\n"
