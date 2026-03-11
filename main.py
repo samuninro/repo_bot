@@ -14,7 +14,17 @@ from aiogram.types import CallbackQuery, InputMediaPhoto, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from dotenv import load_dotenv
 
+import logging
+
 load_dotenv()
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler()]
+)
+
+logger = logging.getLogger(__name__)
 
 # ======================
 # НАСТРОЙКИ
@@ -171,6 +181,12 @@ class ReportForm(StatesGroup):
 # ======================
 # ХРАНИЛИЩЕ ПОЛЬЗОВАТЕЛЕЙ
 # ======================
+
+def kb_skip(prefix: str):
+    kb = InlineKeyboardBuilder()
+    kb.button(text="⏭ Пропустить", callback_data=f"{prefix}:skip")
+    kb.adjust(1)
+    return kb.as_markup()
 
 def load_allowed_users() -> set[int]:
     if not os.path.exists(USERS_FILE):
@@ -365,6 +381,51 @@ def format_report(data: dict) -> str:
     else:
         resp_block = "—"
 
+    done_lines = []
+    if data.get("done_demont") not in (None, ""):
+        done_lines.append(
+            f"• Демонтировано: <b>{esc(format_num(data.get('done_demont')))}</b> п.м."
+        )
+    if data.get("done_mont") not in (None, ""):
+        done_lines.append(
+            f"• Смонтировано: <b>{esc(format_num(data.get('done_mont')))}</b> п.м."
+        )
+    if data.get("done_welds") not in (None, ""):
+        done_lines.append(
+            f"• Сварные стыки: <b>{esc(format_num(data.get('done_welds')))}</b> шт."
+        )
+
+    done_block = ""
+    if done_lines:
+        done_block = f"<b>6️⃣ Выполнено за сутки</b>\n" + "\n".join(done_lines) + "\n\n"
+
+    left_lines = []
+    if data.get("left_demont") not in (None, ""):
+        left_lines.append(
+            f"• Демонтировать: <b>{esc(format_num(data.get('left_demont')))}</b> п.м."
+        )
+    if data.get("left_mont") not in (None, ""):
+        left_lines.append(
+            f"• Смонтировать: <b>{esc(format_num(data.get('left_mont')))}</b> п.м."
+        )
+    if data.get("left_welds") not in (None, ""):
+        left_lines.append(
+            f"• Сварные стыки: <b>{esc(format_num(data.get('left_welds')))}</b> шт."
+        )
+
+    left_block = ""
+    if left_lines:
+        left_block = f"<b>7️⃣ Осталось выполнить</b>\n" + "\n".join(left_lines) + "\n\n"
+
+    materials_block = ""
+    if data.get("materials_total") not in (None, ""):
+        materials_block = (
+            f"<b>8️⃣ Материалы</b>\n"
+            f"• Материала всего на объекте (включая смонтированный): "
+            f"<b>{esc(format_num(data.get('materials_total')))}</b> п.м.\n\n"
+        )
+
+
     report = (
         f"📅 <b>ЕЖЕДНЕВНЫЙ ОТЧЁТ</b>\n"
         f"Дата: <b>{today}</b>\n\n"
@@ -394,19 +455,9 @@ def format_report(data: dict) -> str:
         f"• Тип трубы: <b>{esc(data.get('heat_pipe', ''))}</b>\n"
         f"• Способ прокладки: <b>{esc(data.get('heat_laying', ''))}</b>\n\n"
 
-        f"<b>6️⃣ Выполнено за сутки</b>\n"
-        f"• Демонтировано: <b>{esc(format_num(data.get('done_demont', '')))}</b> п.м.\n"
-        f"• Смонтировано: <b>{esc(format_num(data.get('done_mont', '')))}</b> п.м.\n"
-        f"• Сварные стыки: <b>{esc(format_num(data.get('done_welds', '')))}</b> шт.\n\n"
-
-        f"<b>7️⃣ Осталось выполнить</b>\n"
-        f"• Демонтировать: <b>{esc(format_num(data.get('left_demont', '')))}</b> п.м.\n"
-        f"• Смонтировать: <b>{esc(format_num(data.get('left_mont', '')))}</b> п.м.\n"
-        f"• Сварные стыки: <b>{esc(format_num(data.get('left_welds', '')))}</b> шт.\n\n"
-
-        f"<b>8️⃣ Материалы</b>\n"
-        f"• Материала всего на объекте (включая смонтированный): "
-        f"<b>{esc(format_num(data.get('materials_total', '')))}</b> п.м.\n\n"
+    f"{done_block}"
+    f"{left_block}"
+    f"{materials_block}"
 
         f"<b>9️⃣ Ответственный</b>\n"
         f"{resp_block}\n"
@@ -416,6 +467,7 @@ def format_report(data: dict) -> str:
 
 async def ask_direction(message: Message, state: FSMContext):
     await state.set_state(ReportForm.choosing_direction)
+    logger.info(f"user_id: {message.from_user.id}")
     await message.answer(
         "<b>Привет!👋🏻 Я помогу сформировать ежедневный отчёт.</b>\n\n"
         "<b>Шаг 1: Выберите направление:</b>",
@@ -425,6 +477,7 @@ async def ask_direction(message: Message, state: FSMContext):
 
 async def start_new_report(message: Message, state: FSMContext):
     await state.clear()
+    logger.info(f"user_id: {message.from_user.id}")
     await state.update_data(
         plan_selected=[],
         plan_items=[],
@@ -443,6 +496,7 @@ async def ask_for_number(
     field_name: str,
     next_state: State,
     next_prompt: str,
+    skip_prefix: str | None = None,
 ):
     value = ensure_non_negative_number(message.text)
     if value is None:
@@ -451,7 +505,11 @@ async def ask_for_number(
 
     await state.update_data(**{field_name: value})
     await state.set_state(next_state)
-    await message.answer(next_prompt)
+
+    if skip_prefix:
+        await message.answer(next_prompt, reply_markup=kb_skip(skip_prefix))
+    else:
+        await message.answer(next_prompt)
 
 
 # ======================
@@ -490,6 +548,7 @@ async def cmd_cancel(message: Message, state: FSMContext):
 async def password_received(message: Message, state: FSMContext):
     if message.text == BOT_PASSWORD:
         user_id = message.from_user.id
+        logger.info(f"user_id: {user_id}")
 
         if user_id not in AUTHORIZED_USERS:
             AUTHORIZED_USERS.add(user_id)
@@ -855,72 +914,87 @@ async def heat_laying_chosen(call: CallbackQuery, state: FSMContext):
         await state.set_state(ReportForm.done_demont)
 
         await call.message.edit_text(
-            "<b>Выполнено за сутки:\n\n🪏 Демонтировано (п.м.):</b>"
+            "<b>Выполнено за сутки:\n\n🪏 Демонтировано (п.м.):</b>",
+            reply_markup=kb_skip("done_demont")
         )
         await call.answer()
         return
 
     idx = int(action)
     updated = toggle_index(current_selected, idx)
+
     await state.update_data(heat_laying_selected=updated)
 
     await call.message.edit_reply_markup(
         reply_markup=laying_keyboard(set(updated))
     )
+
     await call.answer()
 
 
 async def done_demont_received(message: Message, state: FSMContext):
     await ask_for_number(
-        message, state,
+        message,
+        state,
         "done_demont",
         ReportForm.done_mont,
-        "<b>Выполнено за сутки:\n\n💪🏻 Смонтировано (п.м.):</b>"
+        "<b>Выполнено за сутки:\n\n💪🏻 Смонтировано (п.м.):</b>",
+        skip_prefix="done_mont"
     )
 
 
 async def done_mont_received(message: Message, state: FSMContext):
     await ask_for_number(
-        message, state,
+        message,
+        state,
         "done_mont",
         ReportForm.done_welds,
-        "<b>Выполнено за сутки:\n\n🪢 Сварные стыки (шт.):</b>"
+        "<b>Выполнено за сутки:\n\n🪢 Сварные стыки (шт.):</b>",
+        skip_prefix="done_welds"
     )
 
 
 async def done_welds_received(message: Message, state: FSMContext):
     await ask_for_number(
-        message, state,
+        message,
+        state,
         "done_welds",
         ReportForm.left_demont,
-        "<b>Осталось выполнить:\n\n🪏 Демонтировать (п.м.):</b>"
+        "<b>Осталось выполнить:\n\n🪏 Демонтировать (п.м.):</b>",
+        skip_prefix="left_demont"
     )
 
 
 async def left_demont_received(message: Message, state: FSMContext):
     await ask_for_number(
-        message, state,
+        message,
+        state,
         "left_demont",
         ReportForm.left_mont,
-        "<b>Осталось выполнить:\n\n💪🏻 Смонтировать (п.м.):</b>"
+        "<b>Осталось выполнить:\n\n💪🏻 Смонтировать (п.м.):</b>",
+        skip_prefix="left_mont"
     )
 
 
 async def left_mont_received(message: Message, state: FSMContext):
     await ask_for_number(
-        message, state,
+        message,
+        state,
         "left_mont",
         ReportForm.left_welds,
-        "<b>Осталось выполнить:\n\n🪢 Сварные стыки (шт.):</b>"
+        "<b>Осталось выполнить:\n\n🪢 Сварные стыки (шт.):</b>",
+        skip_prefix="left_welds"
     )
 
 
 async def left_welds_received(message: Message, state: FSMContext):
     await ask_for_number(
-        message, state,
+        message,
+        state,
         "left_welds",
         ReportForm.materials_total,
-        "<b>🏗️ Материала всего на объекте (п.м.):</b>"
+        "<b>🏗️ Материала всего на объекте (п.м.):</b>",
+        skip_prefix="materials_total"
     )
 
 
@@ -941,6 +1015,80 @@ async def materials_total_received(message: Message, state: FSMContext):
             cols=1
         )
     )
+
+async def skip_done_demont(call: CallbackQuery, state: FSMContext):
+    await state.update_data(done_demont="")
+    await state.set_state(ReportForm.done_mont)
+    await call.message.edit_text(
+        "<b>Выполнено за сутки:\n\n💪🏻 Смонтировано (п.м.):</b>",
+        reply_markup=kb_skip("done_mont")
+    )
+    await call.answer()
+
+
+async def skip_done_mont(call: CallbackQuery, state: FSMContext):
+    await state.update_data(done_mont="")
+    await state.set_state(ReportForm.done_welds)
+    await call.message.edit_text(
+        "<b>Выполнено за сутки:\n\n🪢 Сварные стыки (шт.):</b>",
+        reply_markup=kb_skip("done_welds")
+    )
+    await call.answer()
+
+
+async def skip_done_welds(call: CallbackQuery, state: FSMContext):
+    await state.update_data(done_welds="")
+    await state.set_state(ReportForm.left_demont)
+    await call.message.edit_text(
+        "<b>Осталось выполнить:\n\n🪏 Демонтировать (п.м.):</b>",
+        reply_markup=kb_skip("left_demont")
+    )
+    await call.answer()
+
+
+async def skip_left_demont(call: CallbackQuery, state: FSMContext):
+    await state.update_data(left_demont="")
+    await state.set_state(ReportForm.left_mont)
+    await call.message.edit_text(
+        "<b>Осталось выполнить:\n\n💪🏻 Смонтировать (п.м.):</b>",
+        reply_markup=kb_skip("left_mont")
+    )
+    await call.answer()
+
+
+async def skip_left_mont(call: CallbackQuery, state: FSMContext):
+    await state.update_data(left_mont="")
+    await state.set_state(ReportForm.left_welds)
+    await call.message.edit_text(
+        "<b>Осталось выполнить:\n\n🪢 Сварные стыки (шт.):</b>",
+        reply_markup=kb_skip("left_welds")
+    )
+    await call.answer()
+
+
+async def skip_left_welds(call: CallbackQuery, state: FSMContext):
+    await state.update_data(left_welds="")
+    await state.set_state(ReportForm.materials_total)
+    await call.message.edit_text(
+        "<b>🏗️ Материала всего на объекте (п.м.):</b>",
+        reply_markup=kb_skip("materials_total")
+    )
+    await call.answer()
+
+
+async def skip_materials_total(call: CallbackQuery, state: FSMContext):
+    await state.update_data(materials_total="")
+    await state.set_state(ReportForm.responsible_choose)
+    await call.message.edit_text(
+        "<b>Шаг 8:\n\n📝 Выберите ответственного:</b>",
+        reply_markup=kb_from_list(
+            [f"{r.fio} — {r.position}" for r in RESPONSIBLES],
+            "resp",
+            cols=1
+        )
+    )
+    await call.answer()
+
 
 
 async def responsible_chosen(call: CallbackQuery, state: FSMContext):
@@ -1084,6 +1232,16 @@ def main():
     dp.message.register(left_welds_received, ReportForm.left_welds)
 
     dp.message.register(materials_total_received, ReportForm.materials_total)
+
+    dp.callback_query.register(skip_done_demont, F.data == "done_demont:skip", ReportForm.done_demont)
+    dp.callback_query.register(skip_done_mont, F.data == "done_mont:skip", ReportForm.done_mont)
+    dp.callback_query.register(skip_done_welds, F.data == "done_welds:skip", ReportForm.done_welds)
+
+    dp.callback_query.register(skip_left_demont, F.data == "left_demont:skip", ReportForm.left_demont)
+    dp.callback_query.register(skip_left_mont, F.data == "left_mont:skip", ReportForm.left_mont)
+    dp.callback_query.register(skip_left_welds, F.data == "left_welds:skip", ReportForm.left_welds)
+
+    dp.callback_query.register(skip_materials_total, F.data == "materials_total:skip", ReportForm.materials_total)
 
     dp.callback_query.register(responsible_chosen, F.data.startswith("resp:"), ReportForm.responsible_choose)
 
