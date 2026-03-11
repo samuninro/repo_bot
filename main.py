@@ -311,6 +311,20 @@ def ensure_non_negative_number(text: str) -> float | None:
 def esc(value) -> str:
     return html.escape(str(value)) if value is not None else ""
 
+def num_emoji(n: int) -> str:
+    nums = {
+        1: "1️⃣",
+        2: "2️⃣",
+        3: "3️⃣",
+        4: "4️⃣",
+        5: "5️⃣",
+        6: "6️⃣",
+        7: "7️⃣",
+        8: "8️⃣",
+        9: "9️⃣",
+        10: "🔟",
+    }
+    return nums.get(n, f"{n}.")
 
 def format_num(value) -> str:
     if value is None or value == "":
@@ -320,6 +334,7 @@ def format_num(value) -> str:
             return str(int(value))
         return str(value).replace(".", ",")
     return str(value).replace(".", ",")
+
 
 def current_date_str() -> str:
     return datetime.now().strftime("%d.%m.%Y")
@@ -356,6 +371,9 @@ def format_report(data: dict) -> str:
     fact_selected = data.get("fact_selected", [])
     fact_values = data.get("fact_values", {})
 
+    plan_lines = [f"• {esc(item)}" for item in plan_items] if plan_items else ["—"]
+    plan_block = "\n".join(plan_lines)
+
     fact_lines = []
     for idx in fact_selected:
         text, unit = FACT_WORK_OPTIONS[idx]
@@ -363,13 +381,10 @@ def format_report(data: dict) -> str:
 
         if unit is None:
             fact_lines.append(f"• {esc(text)}")
-        else:
-            fact_lines.append(f"• {esc(text)}: <b>{esc(value)}</b> {esc(unit)}")
+        elif value not in (None, ""):
+            fact_lines.append(f"• {esc(text)}: <b>{esc(format_num(value))}</b> {esc(unit)}")
 
     fact_block = "\n".join(fact_lines) if fact_lines else "—"
-
-    plan_lines = [f"• {esc(item)}" for item in plan_items] if plan_items else ["—"]
-    plan_block = "\n".join(plan_lines)
 
     responsible = get_responsible_by_index(data.get("responsible_idx"))
     if responsible:
@@ -395,10 +410,6 @@ def format_report(data: dict) -> str:
             f"• Сварные стыки: <b>{esc(format_num(data.get('done_welds')))}</b> шт."
         )
 
-    done_block = ""
-    if done_lines:
-        done_block = f"<b>6️⃣ Выполнено за сутки</b>\n" + "\n".join(done_lines) + "\n\n"
-
     left_lines = []
     if data.get("left_demont") not in (None, ""):
         left_lines.append(
@@ -413,57 +424,97 @@ def format_report(data: dict) -> str:
             f"• Сварные стыки: <b>{esc(format_num(data.get('left_welds')))}</b> шт."
         )
 
-    left_block = ""
-    if left_lines:
-        left_block = f"<b>7️⃣ Осталось выполнить</b>\n" + "\n".join(left_lines) + "\n\n"
+    sections = []
 
-    materials_block = ""
-    if data.get("materials_total") not in (None, ""):
-        materials_block = (
-            f"<b>8️⃣ Материалы</b>\n"
-            f"• Материала всего на объекте (включая смонтированный): "
-            f"<b>{esc(format_num(data.get('materials_total')))}</b> п.м.\n\n"
+    sections.append(
+        (
+            "Общая информация",
+            f"• Подрядная организация: <b>{esc(CONTRACTOR)}</b>\n"
+            f"• Объект: <b>{obj_text}</b>\n"
+            f"• Статус МОГЭ: <b>{moge}</b>"
+        )
+    )
+
+    sections.append(
+        (
+            "План работ на текущий день",
+            plan_block
+        )
+    )
+
+    sections.append(
+        (
+            "Ресурсы на объекте",
+            f"• ИТР: <b>{esc(format_num(itr))}</b> чел.\n"
+            f"• Рабочие: <b>{esc(format_num(workers))}</b> чел.\n"
+            f"• Техника: <b>{esc(format_num(machines))}</b> ед."
+        )
+    )
+
+    sections.append(
+        (
+            "Фактически выполненные работы за прошедшие сутки",
+            fact_block
+        )
+    )
+
+    sections.append(
+        (
+            "Общие характеристики",
+            f"• Протяженность сети (общая): <b>{esc(format_num(data.get('heat_total_length', '')))}</b> п.м.\n"
+            f"• Система: <b>{esc(data.get('heat_system', ''))}</b>\n"
+            f"• Тип трубы: <b>{esc(data.get('heat_pipe', ''))}</b>\n"
+            f"• Способ прокладки: <b>{esc(data.get('heat_laying', ''))}</b>"
+        )
+    )
+
+    if done_lines:
+        sections.append(
+            (
+                "Выполнено за сутки",
+                "\n".join(done_lines)
+            )
         )
 
+    if left_lines:
+        sections.append(
+            (
+                "Осталось выполнить",
+                "\n".join(left_lines)
+            )
+        )
 
-    report = (
-        f"📅 <b>ЕЖЕДНЕВНЫЙ ОТЧЁТ</b>\n"
-        f"Дата: <b>{today}</b>\n\n"
+    if data.get("materials_total") not in (None, ""):
+        sections.append(
+            (
+                "Материалы",
+                f"• Материала всего на объекте (включая смонтированный): "
+                f"<b>{esc(format_num(data.get('materials_total')))}</b> п.м."
+            )
+        )
 
-        f"<b>1️⃣ Общая информация</b>\n"
-        f"• Подрядная организация: <b>{esc(CONTRACTOR)}</b>\n"
-        f"• Объект: <b>{obj_text}</b>\n"
-        f"• Статус МОГЭ: <b>{moge}</b>\n\n"
-
-        f"<b>2️⃣ План работ на текущий день</b>\n"
-        f"{plan_block}\n\n"
-
-        f"<b>3️⃣ Ресурсы на объекте</b>\n"
-        f"• ИТР: <b>{esc(format_num(itr))}</b> чел.\n"
-        f"• Рабочие: <b>{esc(format_num(workers))}</b> чел.\n"
-        f"• Техника: <b>{esc(format_num(machines))}</b> ед.\n\n"
-
-        f"<b>4️⃣ Фактически выполненные работы за прошедшие сутки</b>\n"
-        f"{fact_block}\n\n"
-
-        f"━━━━━━━━━━━━━━━━━━━\n"
-        f"<b><u>ТЕПЛОВЫЕ СЕТИ</u></b>\n\n"
-
-        f"<b>5️⃣ Общие характеристики</b>\n"
-        f"• Протяженность сети (общая): <b>{esc(format_num(data.get('heat_total_length', '')))}</b> п.м.\n"
-        f"• Система: <b>{esc(data.get('heat_system', ''))}</b>\n"
-        f"• Тип трубы: <b>{esc(data.get('heat_pipe', ''))}</b>\n"
-        f"• Способ прокладки: <b>{esc(data.get('heat_laying', ''))}</b>\n\n"
-
-        f"{done_block}"
-        f"{left_block}"
-        f"{materials_block}"
-        
-
-        f"<b>9️⃣ Ответственный</b>\n"
-        f"{resp_block}\n"
+    sections.append(
+        (
+            "Ответственный",
+            resp_block
+        )
     )
-    return report
+
+    report_parts = [
+        f"📅 <b>ЕЖЕДНЕВНЫЙ ОТЧЁТ</b>\n"
+        f"Дата: <b>{today}</b>"
+    ]
+
+    thermal_inserted = False
+
+    for i, (title, body) in enumerate(sections, start=1):
+        if title == "Общие характеристики" and not thermal_inserted:
+            report_parts.append("━━━━━━━━━━━━━━━━━━━\n<b><u>ТЕПЛОВЫЕ СЕТИ</u></b>")
+            thermal_inserted = True
+
+        report_parts.append(f"<b>{num_emoji(i)} {title}</b>\n{body}")
+
+    return "\n\n".join(report_parts)
 
 
 async def ask_direction(message: Message, state: FSMContext):
